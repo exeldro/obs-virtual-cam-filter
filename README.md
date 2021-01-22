@@ -1,4 +1,4 @@
-# Move transition for OBS Studio
+# Virtual Camera filter for OBS Studio
 
 Plugin for OBS Studio to make sources available to the virtual camera via a filter
 
