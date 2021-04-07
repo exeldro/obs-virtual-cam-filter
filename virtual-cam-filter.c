@@ -166,6 +166,8 @@ static void virtual_cam_filter_source_destroy(void *data)
 {
 	struct virtual_cam_filter_context *context = data;
 	obs_output_stop(context->virtualCam);
+	obs_output_release(context->virtualCam);
+	video_output_stop(context->video_output);
 
 	obs_remove_main_render_callback(virtual_cam_filter_offscreen_render,
 					context);
