@@ -73,12 +73,6 @@ jobs:
           cd ./build
           make -j4
           cd -
-      - name: 'Install prerequisite: Packages app'
-        if: success()
-        shell: bash
-        run: |
-          curl -L -O https://s3-us-west-2.amazonaws.com/obs-nightly/Packages.pkg
-          sudo installer -pkg ./Packages.pkg -target /
       - name: Package
         if: success()
         shell: bash
