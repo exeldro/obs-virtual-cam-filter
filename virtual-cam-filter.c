@@ -76,8 +76,9 @@ void virtual_cam_filter_offscreen_render(void *data, uint32_t cx, uint32_t cy)
 		vi.range = VIDEO_RANGE_DEFAULT;
 		vi.name = obs_source_get_name(filter->source);
 
-		video_output_close(filter->video_output);
+		video_t * o = filter->video_output;
 		filter->video_output = NULL;
+		video_output_close(o);
 		if (video_output_open(&filter->video_output, &vi) ==
 		    VIDEO_OUTPUT_SUCCESS) {
 			filter->width = width;
@@ -172,8 +173,9 @@ static void virtual_cam_filter_source_destroy(void *data)
 	obs_remove_main_render_callback(virtual_cam_filter_offscreen_render,
 					context);
 
-	video_output_close(context->video_output);
+	video_t *o = context->video_output;
 	context->video_output = NULL;
+	video_output_close(o);
 
 	gs_stagesurface_unmap(context->stagesurface);
 	gs_stagesurface_destroy(context->stagesurface);

@@ -1,4 +1,4 @@
-project(virtual-cam-filter VERSION 0.0.2)
+project(virtual-cam-filter VERSION 0.0.3)
 set(PROJECT_FULL_NAME "Virtual Camera Filter")
 
 if(MSVC)

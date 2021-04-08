@@ -2,6 +2,9 @@
 
 Plugin for OBS Studio to make sources available to the virtual camera via a filter
 
+# Download
+https://obsproject.com/forum/resources/virtual-cam-filter.1142/
+
 # Build
 - Build OBS Studio: https://obsproject.com/wiki/Install-Instructions
 - Check out this repository to plugins/virtual-cam-filter
