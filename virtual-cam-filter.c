@@ -30,13 +30,13 @@ struct video_frame {
 void virtual_cam_filter_offscreen_render(void *data, uint32_t cx, uint32_t cy)
 {
 	struct virtual_cam_filter_context *filter = data;
-	obs_source_t *target = obs_filter_get_target(filter->source);
-	if (!target) {
+	obs_source_t *parent = obs_filter_get_parent(filter->source);
+	if (!parent) {
 		return;
 	}
 
-	const uint32_t width = obs_source_get_base_width(target);
-	const uint32_t height = obs_source_get_base_height(target);
+	const uint32_t width = obs_source_get_width(parent);
+	const uint32_t height = obs_source_get_height(parent);
 	if (!width || !height)
 		return;
 
@@ -54,7 +54,7 @@ void virtual_cam_filter_offscreen_render(void *data, uint32_t cx, uint32_t cy)
 	gs_blend_state_push();
 	gs_blend_function(GS_BLEND_ONE, GS_BLEND_ZERO);
 
-	obs_source_skip_video_filter(filter->source);
+	obs_source_video_render(parent);
 
 	gs_blend_state_pop();
 	gs_texrender_end(filter->texrender);
@@ -76,9 +76,12 @@ void virtual_cam_filter_offscreen_render(void *data, uint32_t cx, uint32_t cy)
 		vi.range = VIDEO_RANGE_DEFAULT;
 		vi.name = obs_source_get_name(filter->source);
 
-		video_t * o = filter->video_output;
+		video_t *o = filter->video_output;
 		filter->video_output = NULL;
-		video_output_close(o);
+		if (o) {
+			video_output_stop(o);
+			video_output_close(o);
+		}
 		if (video_output_open(&filter->video_output, &vi) ==
 		    VIDEO_OUTPUT_SUCCESS) {
 			filter->width = width;
@@ -97,6 +100,8 @@ void virtual_cam_filter_offscreen_render(void *data, uint32_t cx, uint32_t cy)
 				     NULL);
 		if (obs_output_start(filter->virtualCam)) {
 			filter->output_active = true;
+			obs_source_inc_showing(
+				obs_filter_get_parent(filter->source));
 		} else {
 			filter->last_failed_start = time;
 		}
@@ -105,6 +110,7 @@ void virtual_cam_filter_offscreen_render(void *data, uint32_t cx, uint32_t cy)
 		   !obs_source_enabled(filter->source)) {
 		obs_output_stop(filter->virtualCam);
 		filter->output_active = false;
+		obs_source_dec_showing(obs_filter_get_parent(filter->source));
 	}
 
 	struct video_frame output_frame;
@@ -166,6 +172,9 @@ static void *virtual_cam_filter_source_create(obs_data_t *settings,
 static void virtual_cam_filter_source_destroy(void *data)
 {
 	struct virtual_cam_filter_context *context = data;
+	if (context->output_active) {
+		obs_source_dec_showing(obs_filter_get_parent(context->source));
+	}
 	obs_output_stop(context->virtualCam);
 	obs_output_release(context->virtualCam);
 	video_output_stop(context->video_output);
@@ -190,6 +199,7 @@ static void virtual_cam_filter_source_tick(void *data, float seconds)
 		obs_output_stop(context->virtualCam);
 		context->output_active = false;
 		context->restart = false;
+		obs_source_dec_showing(obs_filter_get_parent(context->source));
 	} else if (!context->output_active && context->video_output &&
 		   obs_source_enabled(context->source)) {
 		uint64_t time = obs_get_video_frame_time();
@@ -199,6 +209,8 @@ static void virtual_cam_filter_source_tick(void *data, float seconds)
 				     NULL);
 		if (obs_output_start(context->virtualCam)) {
 			context->output_active = true;
+			obs_source_inc_showing(
+				obs_filter_get_parent(context->source));
 		} else {
 			context->last_failed_start = time;
 		}
@@ -207,6 +219,7 @@ static void virtual_cam_filter_source_tick(void *data, float seconds)
 		   !obs_source_enabled(context->source)) {
 		obs_output_stop(context->virtualCam);
 		context->output_active = false;
+		obs_source_dec_showing(obs_filter_get_parent(context->source));
 	}
 }
 
@@ -226,18 +239,12 @@ void virtual_cam_filter_source_render(void *data, gs_effect_t *effect)
 static void virtual_cam_filter_source_filter_remove(void *data,
 						    obs_source_t *parent)
 {
-}
-
-uint32_t virtual_cam_filter_source_width(void *data)
-{
-	struct virtual_cam_filter_context *s = data;
-	return s->width;
-}
-
-uint32_t virtual_cam_filter_source_height(void *data)
-{
-	struct virtual_cam_filter_context *s = data;
-	return s->height;
+	struct virtual_cam_filter_context *context = data;
+	if (context->output_active) {
+		obs_output_stop(context->virtualCam);
+		context->output_active = false;
+		obs_source_dec_showing(parent);
+	}
 }
 
 struct obs_source_info virtual_cam_filter_info = {
@@ -253,8 +260,6 @@ struct obs_source_info virtual_cam_filter_info = {
 	.video_tick = virtual_cam_filter_source_tick,
 	.get_properties = virtual_cam_filter_source_properties,
 	.filter_remove = virtual_cam_filter_source_filter_remove,
-	.get_width = virtual_cam_filter_source_width,
-	.get_height = virtual_cam_filter_source_height,
 };
 
 OBS_DECLARE_MODULE()
