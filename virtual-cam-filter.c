@@ -1,5 +1,6 @@
 #include <obs-module.h>
 #include <../UI/obs-frontend-api/obs-frontend-api.h>
+#include <util/threading.h>
 #include "version.h"
 #include "util/platform.h"
 
@@ -18,6 +19,8 @@ struct virtual_cam_filter_context {
 	uint64_t last_failed_start;
 	bool restart;
 	bool stopping;
+	bool starting;
+	bool started;
 };
 
 static const char *virtual_cam_filter_source_get_name(void *unused)
@@ -30,6 +33,19 @@ struct video_frame {
 	uint8_t *data[MAX_AV_PLANES];
 	uint32_t linesize[MAX_AV_PLANES];
 };
+
+static void *start_output_thread(void *data)
+{
+	struct virtual_cam_filter_context *filter = data;
+	if (obs_output_start(filter->virtualCam)) {
+		filter->output_active = true;
+		obs_source_inc_showing(obs_filter_get_parent(filter->source));
+	} else {
+		filter->last_failed_start = time;
+	}
+	filter->starting = false;
+	return NULL;
+}
 
 void virtual_cam_filter_offscreen_render(void *data, uint32_t cx, uint32_t cy)
 {
@@ -102,14 +118,12 @@ void virtual_cam_filter_offscreen_render(void *data, uint32_t cx, uint32_t cy)
 			return;
 		obs_output_set_media(filter->virtualCam, filter->video_output,
 				     NULL);
-		if (obs_output_start(filter->virtualCam)) {
-			filter->output_active = true;
-			obs_source_inc_showing(
-				obs_filter_get_parent(filter->source));
-		} else {
-			filter->last_failed_start = time;
+		if (!filter->starting) {
+			filter->starting = true;
+			pthread_t thread;
+			pthread_create(&thread, NULL, start_output_thread,
+				       filter);
 		}
-
 	} else if (filter->output_active &&
 		   !obs_source_enabled(filter->source)) {
 		obs_output_stop(filter->virtualCam);
@@ -148,15 +162,6 @@ void virtual_cam_filter_offscreen_render(void *data, uint32_t cx, uint32_t cy)
 	video_output_unlock_frame(filter->video_output);
 }
 
-static void virtual_cam_filter_source_update(void *data, obs_data_t *settings)
-{
-	struct virtual_cam_filter_context *context = data;
-	obs_remove_main_render_callback(virtual_cam_filter_offscreen_render,
-					context);
-	obs_add_main_render_callback(virtual_cam_filter_offscreen_render,
-				     context);
-}
-
 static void virtual_cam_filter_source_defaults(obs_data_t *settings) {}
 
 static void frontend_event(enum obs_frontend_event event, void *data)
@@ -164,6 +169,8 @@ static void frontend_event(enum obs_frontend_event event, void *data)
 	struct virtual_cam_filter_context *context = data;
 	if (event == OBS_FRONTEND_EVENT_EXIT ||
 	    event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP) {
+		if (context->stopping)
+			return;
 		context->stopping = true;
 		if (context->output_active) {
 			context->output_active = false;
@@ -196,7 +203,6 @@ static void *virtual_cam_filter_source_create(obs_data_t *settings,
 		"virtualcam_output", "virtualcam_output_filter", NULL, NULL);
 	context->texrender = gs_texrender_create(GS_BGRA, GS_ZS_NONE);
 	obs_get_video_info(&context->ovi);
-	virtual_cam_filter_source_update(context, settings);
 	obs_frontend_add_event_callback(frontend_event, context);
 	return context;
 }
@@ -205,19 +211,20 @@ static void virtual_cam_filter_source_destroy(void *data)
 {
 	struct virtual_cam_filter_context *context = data;
 	obs_frontend_remove_event_callback(frontend_event, context);
-	if (context->output_active) {
-		obs_source_dec_showing(obs_filter_get_parent(context->source));
-	}
-	context->stopping = true;
+	if (!context->stopping) {
+		context->stopping = true;
 
-	if (context->virtualCam) {
+		if (context->output_active) {
+			context->output_active = false;
+			obs_source_dec_showing(
+				obs_filter_get_parent(context->source));
+		}
+		obs_remove_main_render_callback(
+			virtual_cam_filter_offscreen_render, context);
 		obs_output_force_stop(context->virtualCam);
 		obs_output_end_data_capture(context->virtualCam);
 		obs_output_release(context->virtualCam);
 	}
-
-	obs_remove_main_render_callback(virtual_cam_filter_offscreen_render,
-					context);
 
 	video_t *o = context->video_output;
 	context->video_output = NULL;
@@ -237,6 +244,11 @@ static void virtual_cam_filter_source_tick(void *data, float seconds)
 	struct virtual_cam_filter_context *context = data;
 	if (context->stopping)
 		return;
+	if (!context->started) {
+		obs_add_main_render_callback(
+			virtual_cam_filter_offscreen_render, context);
+		context->started = true;
+	}
 	if (context->restart && context->output_active) {
 		obs_output_stop(context->virtualCam);
 		context->output_active = false;
@@ -249,14 +261,12 @@ static void virtual_cam_filter_source_tick(void *data, float seconds)
 			return;
 		obs_output_set_media(context->virtualCam, context->video_output,
 				     NULL);
-		if (obs_output_start(context->virtualCam)) {
-			context->output_active = true;
-			obs_source_inc_showing(
-				obs_filter_get_parent(context->source));
-		} else {
-			context->last_failed_start = time;
+		if (!context->starting) {
+			context->starting = true;
+			pthread_t thread;
+			pthread_create(&thread, NULL, start_output_thread,
+				       context);
 		}
-
 	} else if (context->output_active &&
 		   !obs_source_enabled(context->source)) {
 		obs_output_stop(context->virtualCam);
@@ -296,7 +306,6 @@ struct obs_source_info virtual_cam_filter_info = {
 	.get_name = virtual_cam_filter_source_get_name,
 	.create = virtual_cam_filter_source_create,
 	.destroy = virtual_cam_filter_source_destroy,
-	.update = virtual_cam_filter_source_update,
 	.get_defaults = virtual_cam_filter_source_defaults,
 	.video_render = virtual_cam_filter_source_render,
 	.video_tick = virtual_cam_filter_source_tick,

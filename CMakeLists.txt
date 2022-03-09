@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.12..4.0)
 
-project(virtual-cam-filter VERSION 0.0.5)
+project(virtual-cam-filter VERSION 0.0.6)
 set(PROJECT_FULL_NAME "Virtual Camera Filter")
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
